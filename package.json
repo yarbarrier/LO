@@ -1,13 +1,18 @@
 {
-  "name": "api-usuarios",
+  "name": "api-cienaga",
   "version": "1.0.0",
+  "description": "API de sitios de Ciénaga (MySQL en Aiven)",
   "main": "server.js",
+  "type": "module",
   "scripts": {
     "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
   },
   "dependencies": {
     "cors": "^2.8.5",
     "express": "^4.19.2",
-    "mysql2": "^3.9.7"
+    "mysql2": "^3.11.0"
   }
 }

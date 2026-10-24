@@ -1,69 +1,83 @@
-const express = require("express");
-const cors = require("cors");
-const mysql = require("mysql2/promise");
+import express from "express";
+import cors from "cors";
+import mysql from "mysql2/promise";
 
 const app = express();
 app.use(cors());
-app.use(express.json());
 
-// Conexión a Aiven: los datos vienen de variables de entorno (no van en el código)
+const {
+  DB_HOST,
+  DB_PORT,
+  DB_USER,
+  DB_PASSWORD,
+  DB_NAME,
+  DB_CA,
+  API_KEY,
+  PORT = 3000,
+} = process.env;
+
+// Conexión a MySQL (Aiven exige SSL)
 const pool = mysql.createPool({
-  host: process.env.DB_HOST,
-  port: process.env.DB_PORT,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
-  ssl: { rejectUnauthorized: false },
+  host: DB_HOST,
+  port: Number(DB_PORT),
+  user: DB_USER,
+  password: DB_PASSWORD,
+  database: DB_NAME,
   waitForConnections: true,
   connectionLimit: 5,
+  ssl: DB_CA
+    ? { ca: DB_CA.replace(/\\n/g, "\n"), rejectUnauthorized: true }
+    : { rejectUnauthorized: false },
 });
 
-// Probar que la API está viva
-app.get("/", (req, res) => {
-  res.json({ mensaje: "API funcionando" });
-});
+// Protección simple con clave (cabecera x-api-key)
+function requireKey(req, res, next) {
+  if (!API_KEY) return next(); // si no configuras clave, queda abierta
+  if (req.get("x-api-key") !== API_KEY) {
+    return res.status(401).json({ error: "No autorizado" });
+  }
+  next();
+}
 
-// Listar todos los usuarios
-app.get("/usuarios", async (req, res) => {
+const COLUMNAS =
+  "id, nombre, descripcion_historica, categoria, direccion, imagen_url";
+
+app.get("/", (req, res) => res.json({ ok: true, servicio: "API Ciénaga" }));
+
+// Lista todos los sitios (opcional: ?categoria=Plaza)
+app.get("/sitios", requireKey, async (req, res) => {
   try {
-    const [filas] = await pool.query("SELECT * FROM usuarios");
-    res.json(filas);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+    const { categoria } = req.query;
+    const [rows] = categoria
+      ? await pool.query(
+          `SELECT ${COLUMNAS} FROM sitios_cienaga WHERE categoria = ? ORDER BY nombre`,
+          [categoria]
+        )
+      : await pool.query(
+          `SELECT ${COLUMNAS} FROM sitios_cienaga ORDER BY nombre`
+        );
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error al consultar la base de datos" });
   }
 });
 
-// Ver un usuario por id
-app.get("/usuarios/:id", async (req, res) => {
+// Un solo sitio por id
+app.get("/sitios/:id", requireKey, async (req, res) => {
   try {
-    const [filas] = await pool.query("SELECT * FROM usuarios WHERE id = ?", [
-      req.params.id,
-    ]);
-    if (filas.length === 0) {
-      return res.status(404).json({ error: "Usuario no encontrado" });
-    }
-    res.json(filas[0]);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Agregar un usuario
-app.post("/usuarios", async (req, res) => {
-  const { nombre } = req.body;
-  if (!nombre) {
-    return res.status(400).json({ error: "Falta el nombre" });
-  }
-  try {
-    const [resultado] = await pool.query(
-      "INSERT INTO usuarios (nombre) VALUES (?)",
-      [nombre]
+    const [rows] = await pool.query(
+      `SELECT ${COLUMNAS} FROM sitios_cienaga WHERE id = ?`,
+      [req.params.id]
     );
-    res.status(201).json({ id: resultado.insertId, nombre });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+    if (rows.length === 0) {
+      return res.status(404).json({ error: "Sitio no encontrado" });
+    }
+    res.json(rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error al consultar la base de datos" });
   }
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("API escuchando en el puerto " + PORT));
+app.listen(PORT, () => console.log(`API escuchando en el puerto ${PORT}`));
